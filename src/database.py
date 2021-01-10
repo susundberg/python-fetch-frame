@@ -8,6 +8,7 @@ import typing
 import abc
 import logging
 import enum
+import time
 
 LOG = logging.getLogger("frame.db")
 
@@ -23,39 +24,50 @@ class DatabaseStatus(enum.Enum):
 
 DatabaseItemData = typing.Dict[str, typing.Any]
 
-class DatabaseItem:
-    def __init__(self, iid: str, status : DatabaseStatus, data: DatabaseItemData ):
-        self.id = iid
-        self.status = status
-        self.modified = False
-        self.data = data
-    def __repr__(self):
-        return "<DBItem %s %s -- %s>" % (self.id, self.status.value, self.data )
 
-    def update_data( self ):
+class DatabaseItem:
+    def __init__(self):
+        self.id = ""
+        self.status = DatabaseStatus.NONE
+        self.modified = False
+        self.data = {}
+
+    def __repr__(self):
+        return "<DBItem %s %s -- %s>" % (self.id, self.status.value, self.data)
+
+    def update_data(self):
         self.data["_id"] = self.id
         self.data["_status"] = self.status.value
-    
+
     def filter(self):
         self.modified = True
         self.status = DatabaseStatus.FILTERED
 
+    def from_new_data(self, data: DatabaseItemData):
+        self.id = data["_id"]
+        self.status = DatabaseStatus.NEW
+        self.data = data
+        self.data["_ts"] = time.time()
+        self.modified = True
+
+    def from_load_data(self, data: DatabaseItemData):
+        self.id = data["_id"]
+        self.status = data["_status"]
+        self.data = data
 
     @classmethod
-    def from_new_data( cls, iid : str, data : DatabaseItemData ):
-        return cls( iid=iid, status=DatabaseStatus.NONE, data=data ) 
-
-    @classmethod
-    def from_load_data( cls, data : DatabaseItemData ):
-        return cls( iid=data["_id"], status=DatabaseStatus(data["_status"]), data=data ) 
+    @abc.abstractclassmethod
+    def create_from_load_data(cls, data: DatabaseItemData):
+        pass
 
 
 class Database(abc.ABC):
 
-    def __init__(self, basepath: str):
+    def __init__(self, basepath: str, database_item_class):
         self.path_act = Path(basepath) / Path("active")
         self.path_old = Path(basepath) / Path("old")
         self.path_filt = Path(basepath) / Path("filtered")
+        self.DatabaseItem = database_item_class
 
         for pat in [self.path_act, self.path_old, self.path_filt]:
             pat.mkdir(parents=True, exist_ok=True)
@@ -77,6 +89,7 @@ class Database(abc.ABC):
         items_active_last = self._itemset_from_path(self.path_act)
         items_filtered = self._itemset_from_path(self.path_filt)
 
+        LOG.debug("Ready to start classification")
         LOG.debug("Active now: %s", items_active_now)
         LOG.debug("Active last: %s", items_active_last)
         LOG.debug("Filted:  %s", items_filtered)
@@ -102,6 +115,7 @@ class Database(abc.ABC):
             items.append(item)
 
         LOG.info("Item classification done!")
+        LOG.debug("now: %s", items)
 
     def items_save(self, items: typing.List[DatabaseItem]):
 
@@ -128,19 +142,19 @@ class Database(abc.ABC):
         LOG.debug("Load %s from '%s'", item_id, fn)
         with open(str(fn), 'rb') as fid:
             data = json.loads(gzip.decompress(fid.read()).decode("utf-8"))
-            return DatabaseItem.from_load_data( data )
+            return self.DatabaseItem.create_from_load_data(data)
 
-    def _item_save( self, item: DatabaseItem, path : Path ):
-        fn = path / self._item_get_fn( item.id )
+    def _item_save(self, item: DatabaseItem, path: Path):
+        fn = path / self._item_get_fn(item.id)
         item.update_data()
         json_content = json.dumps(item.data).encode("utf-8")
         LOG.debug("Save %s to '%s'", item.id, fn)
         with open(str(fn), 'wb') as fid:
             fid.write(gzip.compress(json_content))
 
-    def _item_move(self, item, path_from : Path, path_to : Path ):
-        fn = self._item_get_fn( item.id )
+    def _item_move(self, item, path_from: Path, path_to: Path):
+        fn = self._item_get_fn(item.id)
         fn_from = path_from / fn
         fn_to = path_to / fn
-        LOG.debug("Move %s from '%s' to '%s'", item.id, fn_from, fn_to )
-        shutil.move( str(fn_from), str(fn_to))
+        LOG.debug("Move %s from '%s' to '%s'", item.id, fn_from, fn_to)
+        shutil.move(str(fn_from), str(fn_to))

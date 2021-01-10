@@ -1,32 +1,41 @@
-
+import pathlib
 from tempfile import TemporaryDirectory
 import unittest
 import logging
 
-logging.basicConfig(level=logging.DEBUG)
-LOG = logging.getLogger("test")
+
+LOG = logging.getLogger("test.database")
 
 from src.database import Database, DatabaseItem, DatabaseStatus
 
+from tests.common import TestBase
+
+
+class TDBItem(DatabaseItem):
+
+    @classmethod
+    def create_from_load_data( cls, data  ):
+        ret = TDBItem()
+        ret.from_load_data( data ) 
+        return ret
+
+    @classmethod
+    def create_from_new_data( cls, data ):
+        ret = TDBItem()
+        ret.from_new_data( data ) 
+        return ret
+
 def get_item_id ( nid : int ):
     return "ID%04d" % nid
+
 def make_item( nid : int , desc=""):
-    return DatabaseItem.from_new_data( get_item_id(nid), {"nid":nid, "desc": desc})
-
-
-class Test(unittest.TestCase):
-
-    def tearDown(self):
-        self.TMPDIR_OBJ.cleanup()
-
+    return TDBItem.create_from_new_data(  { "_id":get_item_id(nid), "nid":nid, "desc": desc})
+ 
+class Test(TestBase):
+    
     def setUp(self):
-        LOG.info("====================================================")
-        LOG.info("=== Starting test: %s ", self._testMethodName)
-        LOG.info("====================================================")
-
-        self.TMPDIR_OBJ = TemporaryDirectory()
-        self.TMPDIR = self.TMPDIR_OBJ.name
-        self.db = Database(basepath=self.TMPDIR)
+        super().setUp() 
+        self.db = Database(basepath=self.TMPDIR, database_item_class=TDBItem )
         self.make_structure()
 
     def _make_old_stuff(self):
@@ -101,4 +110,5 @@ class Test(unittest.TestCase):
         print(items)
 
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.DEBUG)
     unittest.main()
